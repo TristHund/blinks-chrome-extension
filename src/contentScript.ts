@@ -1,11 +1,13 @@
 import '@dialectlabs/blinks/index.css';
 import { setupTwitterObserver } from '@dialectlabs/blinks/ext/twitter';
 import { ActionConfig, BlockchainIds } from '@dialectlabs/blinks';
+import browser from 'webextension-polyfill';
 
+// Adapter function to configure wallet actions
 const adapter = (wallet: string) =>
   new ActionConfig(import.meta.env.VITE_RPC_URL, {
     signTransaction: (tx: string) =>
-      chrome.runtime.sendMessage({
+      browser.runtime.sendMessage({
         type: 'sign_transaction',
         wallet,
         payload: {
@@ -13,7 +15,7 @@ const adapter = (wallet: string) =>
         },
       }),
     connect: () =>
-      chrome.runtime.sendMessage({
+      browser.runtime.sendMessage({
         wallet,
         type: 'connect',
       }),
@@ -22,12 +24,19 @@ const adapter = (wallet: string) =>
     },
   });
 
-function initTwitterObserver() {
-  chrome.runtime.sendMessage({ type: 'getSelectedWallet' }, (wallet) => {
+// Function to initialize the Twitter observer
+async function initTwitterObserver() {
+  try {
+    // Send message to get the selected wallet, and await the response
+    const wallet = await browser.runtime.sendMessage({ type: 'getSelectedWallet' });
+    
     if (wallet) {
-      setupTwitterObserver(adapter(wallet));
+      setupTwitterObserver(adapter(wallet as string)); // Typecast the wallet as a string for TypeScript
     }
-  });
+  } catch (error) {
+    console.error('Error getting selected wallet:', error);
+  }
 }
 
+// Initialize the observer
 initTwitterObserver();

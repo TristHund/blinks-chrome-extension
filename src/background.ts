@@ -1,26 +1,28 @@
 import base58 from 'bs58';
 import { Buffer } from 'buffer';
+import browser from 'webextension-polyfill';
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  console.log('on message', msg, sender);
+browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  const message = msg as { type: string; wallet?: string; payload?: { message?: string; txData?: string } };
+  
   if (!sender.tab || !sender.tab.id) {
-    return null;
+    return undefined; // Correct return type
   }
-  if (msg.type === 'getSelectedWallet') {
-    chrome.storage.local.get(['selectedWallet'], (storage) => {
+
+  if (message.type === 'getSelectedWallet') {
+    browser.storage.local.get('selectedWallet').then((storage) => {
       sendResponse(storage.selectedWallet);
     });
-    return true;
+    return true; // Return true for async handling
   }
 
-  if (!msg.wallet) return false;
-  handleWalletCommunication(sender.tab.id, msg.type, msg.wallet, msg.payload)
-    .then((res) => {
-      sendResponse(res);
-    })
-    .catch((err) => {
-      console.error('error handling message', err);
-    });
+  if (!message.wallet) {
+    return undefined; // Return undefined instead of false
+  }
+
+  handleWalletCommunication(sender.tab.id, message.type, message.wallet, message.payload || {})
+    .then((res) => sendResponse(res))
+    .catch((err) => console.error('Error handling message', err));
 
   return true;
 });
@@ -29,81 +31,59 @@ async function handleWalletCommunication(
   tabId: number,
   type: string,
   wallet: string,
-  payload: object,
+  payload: { message?: string; txData?: string }
 ) {
   if (type === 'connect') {
-    console.log('connecting wallet', wallet);
-    const res = await chrome.scripting.executeScript({
-      world: 'MAIN',
-      target: { tabId: tabId },
-      func:
-        wallet === 'solflare'
-          ? async () => {
-              // @ts-ignore
-              const provider = window.solflare;
-              const res = await provider.connect();
-              return provider.publicKey.toString();
-            }
-          : async () => {
-              // @ts-ignore
-              const provider = window.solana;
-              const res = await provider.connect();
-              return res.publicKey.toString();
-            },
+    const res = await browser.tabs.executeScript(tabId, {
+      code: `(${wallet === 'solflare'
+        ? async () => {
+            const provider = (window as any).solflare;  // Explicit type assertion for window.solflare
+            const res = await provider.connect();
+            return provider.publicKey.toString();
+          }
+        : async () => {
+            const provider = (window as any).solana;    // Explicit type assertion for window.solana
+            const res = await provider.connect();
+            return res.publicKey.toString();
+          }}())`
     });
-    return res[0].result;
+
+    return res[0];
   } else if (type === 'sign_message') {
-    // @ts-ignore
-    console.log('signing message', payload.message);
-    const res = await chrome.scripting.executeScript({
-      world: 'MAIN',
-      target: { tabId: tabId },
-      func: async (message: string) => {
-        const provider =
-          // @ts-ignore
-          wallet === 'solflare' ? window.solflare : window.solana;
+    const res = await browser.tabs.executeScript(tabId, {
+      code: `(${async function(message: string, wallet: string) {
+        const provider = wallet === 'solflare'
+          ? (window as any).solflare  // Type assertion
+          : (window as any).solana;   // Type assertion
         const textToSign = new TextEncoder().encode(message);
-        const res = await provider.signMessage(textToSign);
-        return res;
-      },
-      // @ts-ignore
-      args: [payload.message, wallet],
+        const result = await provider.signMessage(textToSign);
+        return result;
+      }}("${payload.message}", "${wallet}"))`
     });
-    return res[0].result;
+
+    return res[0];
   } else if (type === 'sign_transaction') {
-    // @ts-ignore
-    console.log('signing transaction', wallet, payload.txData);
-    const res = await chrome.scripting.executeScript({
-      world: 'MAIN',
-      target: { tabId: tabId },
-      func: async (transaction: string, wallet) => {
+    const txData = payload.txData ? base58.encode(Buffer.from(payload.txData, 'base64')) : '';
+
+    const res = await browser.tabs.executeScript(tabId, {
+      code: `(${async function(transaction: string, wallet: string) {
         try {
-          const res =
-            wallet === 'solflare'
-              ? // @ts-ignore
-                await window.solflare.request({
-                  method: 'signAndSendTransaction',
-                  params: {
-                    transaction,
-                  },
-                })
-              : // @ts-ignore
-                await window.solana.request({
-                  method: 'signAndSendTransaction',
-                  params: {
-                    message: transaction,
-                  },
-                });
-          console.log('result', res);
-          return res;
+          const result = wallet === 'solflare'
+            ? await (window as any).solflare.request({  // Type assertion
+                method: 'signAndSendTransaction',
+                params: { transaction },
+              })
+            : await (window as any).solana.request({  // Type assertion
+                method: 'signAndSendTransaction',
+                params: { message: transaction },
+              });
+          return result;
         } catch (e: any) {
-          console.log('error', e);
           return { error: e.message ?? 'Unknown error' };
         }
-      },
-      // @ts-ignore
-      args: [base58.encode(Buffer.from(payload.txData, 'base64')), wallet],
+      }}("${txData}", "${wallet}"))`
     });
-    return res[0].result;
+
+    return res[0];
   }
 }

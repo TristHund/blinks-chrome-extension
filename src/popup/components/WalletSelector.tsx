@@ -4,16 +4,19 @@ import SolflareLogo from '../assets/SolflareLogo';
 import BackpackLogo from '../assets/BackpackLogo';
 import ArrowFromSquareIcon from '../icons/ArrowFromSquareIcon';
 import { Checkbox } from './Checkbox';
+import browser from 'webextension-polyfill';  // Import the polyfill
 
 enum Wallets {
   Solflare = 'solflare',
   Phantom = 'phantom',
 }
+
 interface WalletProps {
   title: string;
   subtitle?: string;
   icon: ReactNode;
 }
+
 const WalletSelect = ({
   title,
   subtitle,
@@ -67,7 +70,7 @@ const WalletLink = ({
       'border px-4 py-3 flex flex-row items-center gap-3 rounded-lg hover:border-[#C4C6C8]'
     }
     onClick={() =>
-      chrome.tabs.create({
+      browser.tabs.create({  // Use browser.tabs.create instead of chrome.tabs.create
         url,
       })
     }
@@ -94,15 +97,17 @@ export const WalletSelector = ({
 }) => {
   function selectWallet(wallet: string) {
     setSelectedWallet(wallet);
-    chrome.storage.local.set({ selectedWallet: wallet });
+    browser.storage.local.set({ selectedWallet: wallet });  // Use browser.storage.local.set
   }
 
   function unselectWallet() {
     setSelectedWallet(null);
-    chrome.storage.local.remove('selectedWallet');
+    browser.storage.local.remove('selectedWallet');  // Use browser.storage.local.remove
   }
+
   const isWalletSolflare = selectedWallet === Wallets.Solflare;
   const isWalletPhantom = selectedWallet === Wallets.Phantom;
+
   return (
     <div className="flex flex-col flex-1 gap-2 w-full">
       <WalletSelect
